@@ -2,3 +2,4 @@
 .idea
 datasets/*
 sql/*
+.ipynb_checkpoints/*
