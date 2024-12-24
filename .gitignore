@@ -3,3 +3,5 @@
 datasets/*
 sql/*
 .ipynb_checkpoints/*
+.env
+mun_agro
