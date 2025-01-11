@@ -76,13 +76,13 @@ def create_table(dataframe, table_name, connection):
     dataframe.to_sql(table_name, connection, if_exists="replace", index=False)
 
 
-def format_municipios(db_file):
+def format_municipios(sqlite_db_file, geopackage_file):
     """Loads and formats municipality data."""
     data = geopandas.read_file("datasets/municipios/BA_Municipios_2022.dbf")
 
     ## municipio
-    data_sql = data.drop(["NM_MUN", "SIGLA_UF"], axis=1)
-    data_sql.to_file(db_file, driver="SQLite", layer="municipio")
+    data.to_file(sqlite_db_file, driver="SQLite", layer="municipio")
+    data.to_file(geopackage_file, driver="GPKG", layer="municipio")
 
     return data
 
@@ -187,6 +187,8 @@ def format_candidato(connection, mun):
     data["NM_MUN"] = data["NM_MUNICIPIO"]
 
     data.drop(["CD_MUNICIPIO", "NM_MUNICIPIO"], axis=1, inplace=True)
+
+    data["DS_SIT_TOT_TURNO"] = data["DS_SIT_TOT_TURNO"].str.strip()
 
     # Create the sql tables
     create_table(
@@ -388,17 +390,21 @@ def format_censo_agro(connection, mun):
 
 def create_db(db_path="sql"):
     name = "eleicao.db"
+    geopackage_name = "municipios.gpkg"
+
     db_file = os.path.join(db_path, name)
+    geopackage_file = os.path.join(db_path, geopackage_name)
 
     if not os.path.exists(db_path):
         os.mkdir(db_path)
 
-    if os.path.isfile(db_file):
-        os.remove(db_file)
-    else:
-        open(db_file, "w").close()
+    for file in [db_file, geopackage_file]:
+        if os.path.isfile(file):
+            os.remove(file)
+        else:
+            open(file, "w").close()
 
-    mun = format_municipios(db_file)
+    mun = format_municipios(db_file, geopackage_file)
 
     connection = sqlite3.connect(db_file)
 
