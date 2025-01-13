@@ -175,6 +175,35 @@ def format_candidato(connection, mun):
         connection,
     )
 
+    create_table(
+        data[["NR_PARTIDO", "NM_PARTIDO", "TP_AGREMIACAO", "SG_PARTIDO"]]
+        .drop_duplicates()
+        .dropna(),
+        "partido",
+        connection,
+    )
+
+    create_table(
+        data[["SG_FEDERACAO", "NM_FEDERACAO", "DS_COMPOSICAO_FEDERACAO"]]
+        .drop_duplicates()
+        .dropna(),
+        "federacao",
+        connection,
+    )
+
+    create_table(
+        data[["NM_COLIGACAO", "SQ_COLIGACAO", "DS_COMPOSICAO_COLIGACAO"]]
+        .drop_duplicates()
+        .dropna(),
+        "coligacao",
+        connection,
+    )
+
+    create_table(
+        data[["CD_MUN", "NM_MUN"]].drop_duplicates().dropna(),
+        "municipio_nome",
+        connection,
+    )
 
 def format_censo(connection, mun):
     """Formata os dados do Censo, garantindo o mapeamento correto de CD_MUN."""
