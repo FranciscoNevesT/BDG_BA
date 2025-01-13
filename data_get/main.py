@@ -9,6 +9,7 @@ if os.path.exists("zip"):
 
 if __name__ == "__main__":
     base_url_IBGE = "https://ftp.ibge.gov.br/Censos/Censo_Demografico_2022/Agregados_por_Setores_Censitarios/Agregados_por_Municipio_csv/"
+    base_url_IBGE_dist = "https://ftp.ibge.gov.br/Censos/Censo_Demografico_2022/Agregados_por_Setores_Censitarios/Agregados_por_Distrito_csv/"
 
     zips_to_download = {
         "municipios": "https://geoftp.ibge.gov.br/organizacao_do_territorio/malhas_territoriais/malhas_municipais/municipio_2022/UFs/BA/BA_Municipios_2022.zip",
@@ -47,6 +48,9 @@ if __name__ == "__main__":
         ),
         "quilombolas": "{}/Agregados_por_municipios_pessoas_quilombolas_BR.zip".format(
             base_url_IBGE
+        ),
+        "distritos_basico": "{}/Agregados_por_distritos_basico_BR.zip".format(
+            base_url_IBGE_dist
         ),
         "candidato": "https://cdn.tse.jus.br/estatistica/sead/odsele/votacao_candidato_munzona/votacao_candidato_munzona_2022.zip",
         "censo_agro": "https://files.catbox.moe/aojnd0.zip",
