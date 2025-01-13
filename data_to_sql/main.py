@@ -221,6 +221,7 @@ def format_censo(connection, mun):
         "parentesco",
         "indigenas",
         "quilombolas",
+        "distritos_basico"
     ]
 
     for csv in csv_names:
@@ -390,8 +391,8 @@ def format_censo_agro(connection, mun):
 
 
 def create_db(db_path="sql"):
-    name = "eleicao2.db"
-    geopackage_name = "municipios2.gpkg"
+    name = "eleicao.db"
+    geopackage_name = "municipios.gpkg"
 
     db_file = os.path.join(db_path, name)
     geopackage_file = os.path.join(db_path, geopackage_name)
