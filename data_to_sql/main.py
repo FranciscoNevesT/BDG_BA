@@ -1,19 +1,19 @@
 import os
 import sqlite3
-import numpy as np
 import pandas as pd
-import geopandas
-
+import geopandas as gpd
+import unidecode
+import time
 
 def remove_aspas(value):
-    """Removes double quotes from a string."""
+    """Remove aspas duplas de uma string."""
     if isinstance(value, str):
         return value.replace('"', "")
     return value
 
 
 def read_csv(path):
-    """Reads a CSV file, removes inconsistent rows, and drops columns with only one unique value."""
+    """Lê um arquivo CSV, remove linhas inconsistentes e descarta colunas com apenas um valor único."""
     try:
         with open(path, "r") as file:
             text = file.read()
@@ -34,22 +34,17 @@ def read_csv(path):
     data = pd.DataFrame(data, columns=columns)
 
     # Corrigir strings
-    data = data.map(remove_aspas)
+    data = data.applymap(remove_aspas)
 
     for col in data.columns:
         if data[col].nunique() == 1:
             data.drop(col, axis=1, inplace=True)
 
-    for i in data.columns:
         try:
-            data[i] = data[i].astype(int)
+            data[col] = data[col].astype(int)
         except:
             try:
-                column_values = data[i]
-                column_values = column_values.apply(
-                    lambda x: x.replace(",", ".")
-                ).astype(float)
-                data[i] = column_values
+                data[col] = data[col].apply(lambda x: x.replace(",", ".")).astype(float)
             except:
                 pass
 
@@ -57,30 +52,46 @@ def read_csv(path):
 
 
 def corrigir_municipos_nomes(data):
-    """Standardizes municipality names."""
+    """Padroniza nomes de municípios em maiúsculas e sem acentuação."""
     corrections = {
-        "CAMACÃ": "CAMACAN",
+        "CAMACA": "CAMACAN",
         "SANTO ESTEVÃO": "SANTO ESTÊVÃO",
         "CAEM": "CAÉM",
-        "DIAS D ÁVILA": "DIAS D'ÁVILA",
-        "Araças": "ARAÇÁS",
-        "Iuiú": "IUIU",
-        "Santa Teresinha": "SANTA TEREZINHA",
-        "Muquém de São Francisco": "MUQUÉM DO SÃO FRANCISCO",
+        "DIAS D AVILA": "DIAS D'ÁVILA",
+        "ARAÇAS": "ARAÇÁS",
+        "IUIÚ": "IUIU",
+        "SANTA TERESINHA": "SANTA TEREZINHA",
+        "MUQUEM DE SÃO FRANCISCO": "MUQUÉM DO SÃO FRANCISCO",
+        "ARATUÍPE": "ARATUÍPE",
+        "VITÓRIA DA CONQUISTA": "VITÓRIA DA CONQUISTA",
     }
+
+    # Padronização geral: remover acentos, deixar em maiúsculas
+    data = data.applymap(
+        lambda x: unidecode.unidecode(x.upper()) if isinstance(x, str) else x
+    )
     return data.replace(corrections)
 
 
+def map_municipios(municipio, mun_dict):
+    """Mapeia o nome do município para o código correspondente."""
+    try:
+        return mun_dict[unidecode.unidecode(municipio.upper())]
+    except KeyError:
+        print(f"Município não encontrado no dicionário: {municipio}")
+        return None
+
+
 def create_table(dataframe, table_name, connection):
-    """Creates a table in the SQLite database from a DataFrame."""
+    """Cria uma tabela no banco SQLite a partir de um DataFrame."""
     dataframe.to_sql(table_name, connection, if_exists="replace", index=False)
 
 
 def format_municipios(sqlite_db_file, geopackage_file):
-    """Loads and formats municipality data."""
-    data = geopandas.read_file("datasets/municipios/BA_Municipios_2022.dbf")
+    """Carrega e formata os dados dos municípios."""
+    data = gpd.read_file("datasets/municipios/BA_Municipios_2022.dbf")
 
-    ## municipio
+    # Salvar no banco e no GeoPackage
     data.to_file(sqlite_db_file, driver="SQLite", layer="municipio")
     data.to_file(geopackage_file, driver="GPKG", layer="municipio")
 
@@ -88,30 +99,17 @@ def format_municipios(sqlite_db_file, geopackage_file):
 
 
 def format_partido(connection, mun):
-    # Load data
     data = read_csv("datasets/partido/votacao_partido_munzona_2022_BA.csv")
 
-    # Handle missing values
     data.replace(data["SG_FEDERACAO"].iloc[0], pd.NA, inplace=True)
-
-    # Drop redundant columns
     redundant_cols = ["CD_ELEICAO", "DT_ELEICAO", "NR_FEDERACAO", "CD_CARGO"]
     data.drop(columns=redundant_cols, inplace=True)
 
-    # Corrigir municipios nomes
     data = corrigir_municipos_nomes(data)
-    mun_dict = {
-        nm_mun.upper(): cd_mun for cd_mun, nm_mun in mun[["CD_MUN", "NM_MUN"]].values
-    }
-    data["CD_MUN"] = data["NM_MUNICIPIO"].apply(lambda x: mun_dict[x])
-    data["NM_MUN"] = data["NM_MUNICIPIO"]
+    mun["NM_MUN"] = mun["NM_MUN"].apply(lambda x: unidecode.unidecode(x.upper()))
+    mun_dict = {row["NM_MUN"]: row["CD_MUN"] for _, row in mun.iterrows()}
+    data["CD_MUN"] = data["NM_MUNICIPIO"].apply(lambda x: map_municipios(x, mun_dict))
 
-    data["CD_MUN"] = data["NM_MUNICIPIO"].apply(lambda x: mun_dict[x])
-    data["NM_MUN"] = data["NM_MUNICIPIO"]
-
-    data.drop(["CD_MUNICIPIO", "NM_MUNICIPIO"], axis=1, inplace=True)
-
-    # Create the sql tables
     create_table(
         data[
             [
@@ -130,67 +128,26 @@ def format_partido(connection, mun):
         connection,
     )
 
-    create_table(
-        data[["NR_PARTIDO", "NM_PARTIDO", "TP_AGREMIACAO", "SG_PARTIDO"]]
-        .drop_duplicates()
-        .dropna(),
-        "partido",
-        connection,
-    )
-
-    create_table(
-        data[["SG_FEDERACAO", "NM_FEDERACAO", "DS_COMPOSICAO_FEDERACAO"]]
-        .drop_duplicates()
-        .dropna(),
-        "federacao",
-        connection,
-    )
-
-    create_table(
-        data[["NM_COLIGACAO", "SQ_COLIGACAO", "DS_COMPOSICAO_COLIGACAO"]]
-        .drop_duplicates()
-        .dropna(),
-        "coligacao",
-        connection,
-    )
-
-    create_table(
-        data[["CD_MUN", "NM_MUN"]].drop_duplicates().dropna(),
-        "municipio_nome",
-        connection,
-    )
-
 
 def format_candidato(connection, mun):
-    """Processes and formats candidate data."""
-    # Load data
     data = read_csv("datasets/candidato/votacao_candidato_munzona_2022_BA.csv")
 
     data.rename(columns={'DS_SIT_TOT_TURNO"': "DS_SIT_TOT_TURNO"}, inplace=True)
-
-    # Handle missing values
     data.replace(data["SG_FEDERACAO"].iloc[0], pd.NA, inplace=True)
 
-    # Tirar dados redundantes
-    redudante = ["CD_ELEICAO", "DT_ELEICAO", "NR_FEDERACAO", "CD_CARGO"]
-    data.drop(redudante, axis=1, inplace=True)
+    redundant_cols = ["CD_ELEICAO", "DT_ELEICAO", "NR_FEDERACAO", "CD_CARGO"]
+    data.drop(columns=redundant_cols, inplace=True)
 
-    # Corrigir municipios nomes
     data = corrigir_municipos_nomes(data)
-    mun_dict = {
-        nm_mun.upper(): cd_mun for cd_mun, nm_mun in mun[["CD_MUN", "NM_MUN"]].values
-    }
-    data["CD_MUN"] = data["NM_MUNICIPIO"].apply(lambda x: mun_dict[x])
-    data["NM_MUN"] = data["NM_MUNICIPIO"]
-
-    data["CD_MUN"] = data["NM_MUNICIPIO"].apply(lambda x: mun_dict[x])
+    mun["NM_MUN"] = mun["NM_MUN"].apply(
+        lambda x: unidecode.unidecode(x.upper())
+    )  # Padroniza nomes no dicionário também
+    mun_dict = {row["NM_MUN"]: row["CD_MUN"] for _, row in mun.iterrows()}
+    data["CD_MUN"] = data["NM_MUNICIPIO"].apply(lambda x: map_municipios(x, mun_dict))
     data["NM_MUN"] = data["NM_MUNICIPIO"]
 
     data.drop(["CD_MUNICIPIO", "NM_MUNICIPIO"], axis=1, inplace=True)
 
-    data["DS_SIT_TOT_TURNO"] = data["DS_SIT_TOT_TURNO"].str.strip()
-
-    # Create the sql tables
     create_table(
         data[
             [
@@ -219,7 +176,8 @@ def format_candidato(connection, mun):
     )
 
 
-def format_censo(connection):
+def format_censo(connection, mun):
+    """Formata os dados do Censo, garantindo o mapeamento correto de CD_MUN."""
     csv_names = [
         "alfabetizacao",
         "basico",
@@ -244,28 +202,40 @@ def format_censo(connection):
         data = read_csv(csv_path)
 
         data.drop("NM_MUN", axis=1, inplace=True)
-
         data.to_sql(csv, connection, if_exists="replace", index=False)
 
+def format_cad_unico(connection, mun):
+    """Formata os dados do Cadastro Único e adiciona CD_MUN com base no dicionário de municípios."""
 
-def format_cad_unico(connection):
-    cad_unico = pd.read_csv("datasets/cad_unico/cad_unico.csv")
+    cad_unico = pd.read_csv("datasets/cad_unico/cad_unico.csv", encoding="latin1", sep=",")
 
-    cad_unico["anomes"] = cad_unico["anomes"].astype(str)
-    cad_unico["ano"] = cad_unico["anomes"].str[:4]
-    cad_unico["mes"] = cad_unico["anomes"].str[4:]
-    cad_unico["ano"] = cad_unico["ano"].astype(int)
-    cad_unico["mes"] = cad_unico["mes"].astype(int)
-    cad_unico.drop("anomes", axis=1, inplace=True)
+    cad_unico.rename(columns={
+        "Código": "CD_MUN",
+        "Unidade Territorial": "NM_MUN",
+        "UF": "UF",
+        "Referência": "REFERENCIA",
+        "Total de Benefícios Básicos": "TOTAL_BENEFICIOS_BASICOS",
+        "Total de Benefícios Variáveis": "TOTAL_BENEFICIOS_VARIAVEIS",
+        "Total de Benefícios Variáveis vinculados ao Jovem (BVJ)": "BENEFICIOS_JOVEM",
+        "Total de Benefícios Variáveis vinculados à Nutriz (BVN)": "BENEFICIOS_NUTRIZ",
+        "Total de Benefícios Variáveis vinculados à Gestante (BVG)": "BENEFICIOS_GESTANTE",
+        "Total de Benefícios para Superação da Extrema Pobreza (BSP)": "BENEFICIOS_EXTREMA_POBREZA"
+    }, inplace=True)
 
-    cad_unico["CD_MUN"] = cad_unico["ibge"]
-    cad_unico.drop("ibge", axis=1, inplace=True)
+    cad_unico = corrigir_municipos_nomes(cad_unico)
+
+    mun["NM_MUN"] = mun["NM_MUN"].apply(lambda x: unidecode.unidecode(x.upper()))
+    mun_dict = {row["NM_MUN"]: row["CD_MUN"] for _, row in mun.iterrows()}
+
+    cad_unico["CD_MUN"] = cad_unico["NM_MUN"].apply(lambda x: map_municipios(x, mun_dict))
+
+    cad_unico.drop("NM_MUN", axis=1, inplace=True)
 
     table_name = "cadastro_unico"
     cad_unico.to_sql(table_name, connection, if_exists="replace", index=False)
 
 
-def format_bolsa_familia(connection):
+def format_bolsa_familia(connection, mun):
     bf_2021 = pd.read_csv("datasets/bolsa_familia/bolsa_familia.csv")
 
     bf_2021["anomes"] = bf_2021["anomes"].astype(str)
@@ -283,9 +253,8 @@ def format_bolsa_familia(connection):
     table_name = "bolsa_familia"
     bf_2021.to_sql(table_name, connection, if_exists="replace", index=False)
 
-
 def format_censo_agro(connection, mun):
-    gdf = geopandas.read_file("datasets/censo_agro/mun_agro/mun_agro.shp")
+    gdf = gpd.read_file("datasets/censo_agro/mun_agro/mun_agro.shp")
 
     gdf[["municipio", "estado"]] = gdf["MUNICIPIO"].str.split(" - ", expand=True)
 
@@ -373,9 +342,12 @@ def format_censo_agro(connection, mun):
 
     gdf = corrigir_municipos_nomes(gdf)
 
-    mun_index = {i[1].lower(): int(i[0]) for i in mun.values}
+    gdf["municipio"] = gdf["municipio"].apply(lambda x: unidecode.unidecode(x.upper()))
 
-    gdf["CD_MUN"] = gdf["municipio"].apply(lambda x: mun_index[x.lower()])
+    mun["NM_MUN"] = mun["NM_MUN"].apply(lambda x: unidecode.unidecode(x.upper()))
+    mun_dict = {row["NM_MUN"]: row["CD_MUN"] for _, row in mun.iterrows()}
+
+    gdf["CD_MUN"] = gdf["municipio"].apply(lambda x: map_municipios(x, mun_dict))
 
     gdf.drop(
         ["OBJECTID", "Shape_Leng", "Shape_Area", "geometry", "municipio"],
@@ -389,8 +361,8 @@ def format_censo_agro(connection, mun):
 
 
 def create_db(db_path="sql"):
-    name = "eleicao.db"
-    geopackage_name = "municipios.gpkg"
+    name = "eleicao2.db"
+    geopackage_name = "municipios2.gpkg"
 
     db_file = os.path.join(db_path, name)
     geopackage_file = os.path.join(db_path, geopackage_name)
@@ -404,20 +376,38 @@ def create_db(db_path="sql"):
         else:
             open(file, "w").close()
 
+    print("Iniciando formatação de municípios...")
+    time.sleep(1)
     mun = format_municipios(db_file, geopackage_file)
 
     connection = sqlite3.connect(db_file)
 
+    print("Iniciando formatação de partidos...")
+    time.sleep(1)
     format_partido(connection=connection, mun=mun)
+
+    print("Iniciando formatação de candidatos...")
+    time.sleep(1)
     format_candidato(connection=connection, mun=mun)
-    format_censo(connection=connection)
-    format_cad_unico(connection=connection)
-    format_bolsa_familia(connection=connection)
+
+    print("Iniciando formatação de dados do censo...")
+    time.sleep(1)
+    format_censo(connection=connection, mun=mun)
+
+    print("Iniciando formatação de Cadastro Único...")
+    time.sleep(1)
+    format_cad_unico(connection=connection, mun=mun)
+
+    print("Iniciando formatação de Bolsa Família...")
+    time.sleep(1)
+    format_bolsa_familia(connection=connection, mun=mun)
+
+    print("Iniciando formatação de dados do Censo Agropecuário...")
+    time.sleep(1)
     format_censo_agro(connection=connection, mun=mun)
 
     connection.close()
 
 
 if __name__ == "__main__":
-
     create_db()
